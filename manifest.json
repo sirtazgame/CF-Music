@@ -1,9 +1,10 @@
+
 {
     "id": "./",
     "name": "CFMusic",
     "short_name": "CFMusic",
     "description": "Personal music player",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "start_url": "./index.html",
     "scope": "./",
     "display": "standalone",

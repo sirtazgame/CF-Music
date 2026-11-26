@@ -20,7 +20,8 @@
             padding: 40px 15px;
         }
 
-        button {
+        button, .import-button {
+            display: inline-block;
             background: #292930;
             color: white;
             border: none;
@@ -28,6 +29,18 @@
             padding: 15px;
             margin: 3px;
             font-size: 18px;
+            cursor: pointer;
+        }
+
+        .import-button {
+            background: #354b80;
+            margin-bottom: 20px;
+        }
+
+        #files {
+            display: block;
+            margin: 15px auto;
+            max-width: 100%;
         }
 
         audio {
@@ -39,8 +52,17 @@
             overflow-wrap: anywhere;
         }
 
-        #status {
+        #status, #counter {
             color: #999;
+        }
+
+        #debug {
+            margin-top: 25px;
+            color: #aaa;
+            font-size: 12px;
+            text-align: left;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
         }
     </style>
 </head>
@@ -48,10 +70,15 @@
 <body>
 
     <h1>CFMusic</h1>
-    <p>Prototype 0.0.1</p>
+    <p>Prototype 0.0.2</p>
 
-    <input id="files" type="file" accept="audio/*" multiple>
+    <label for="files" class="import-button">
+        Import Music
+    </label>
 
+    <input id="files" type="file" multiple>
+
+    <p id="counter">0 tracks loaded</p>
     <h2 id="title">No music selected</h2>
     <p id="status">Ready</p>
 
@@ -65,153 +92,228 @@
 
     <audio id="audio" controls preload="auto"></audio>
 
-    <script>
-        const audio = document.getElementById("audio");
-        const title = document.getElementById("title");
-        const status = document.getElementById("status");
-        const playButton = document.getElementById("playButton");
+    <div id="debug"></div>
 
-        let tracks = [];
-        let current = 0;
+<script>
+    const audio = document.getElementById("audio");
+    const title = document.getElementById("title");
+    const status = document.getElementById("status");
+    const counter = document.getElementById("counter");
+    const playButton = document.getElementById("playButton");
+    const files = document.getElementById("files");
+    const debug = document.getElementById("debug");
 
-        document.getElementById("files").onchange = event => {
-            audio.pause();
+    let tracks = [];
+    let current = 0;
 
-            tracks.forEach(track => URL.revokeObjectURL(track.url));
+    function log(message) {
+        debug.textContent += message + "\n";
+    }
 
-            tracks = Array.from(event.target.files).map(file => ({
+    log("CFMusic 0.0.2 started");
+
+    files.addEventListener("click", () => {
+        log("Opening file picker...");
+    });
+
+    files.addEventListener("change", event => {
+        const selected = Array.from(event.target.files);
+
+        log("Selected files: " + selected.length);
+
+        if (!selected.length) return;
+
+        const supported = selected.filter(file =>
+            /\.(mp3|m4a|aac|wav|flac|ogg|opus|webm)$/i.test(file.name)
+            || file.type.startsWith("audio/")
+        );
+
+        if (!supported.length) {
+            status.textContent = "No supported audio files";
+            return;
+        }
+
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+
+        tracks.forEach(track => {
+            URL.revokeObjectURL(track.url);
+        });
+
+        tracks = supported.map(file => {
+            log("Loaded: " + file.name);
+
+            return {
                 title: file.name.replace(/\.[^.]+$/, ""),
                 url: URL.createObjectURL(file)
-            }));
+            };
+        });
 
-            if (tracks.length) load(0);
-        };
+        counter.textContent = tracks.length + " tracks loaded";
 
-        function load(index, autoplay = false) {
-            if (!tracks.length) return;
+        load(0);
 
-            current = (index + tracks.length) % tracks.length;
+        files.value = "";
+    });
 
-            const track = tracks[current];
+    function load(index, autoplay = false) {
+        if (!tracks.length) return;
 
-            audio.src = track.url;
-            title.textContent = track.title;
-            status.textContent = `${current + 1} / ${tracks.length}`;
+        current = (index + tracks.length) % tracks.length;
 
-            if ("mediaSession" in navigator) {
-                navigator.mediaSession.metadata = new MediaMetadata({
-                    title: track.title,
-                    artist: "CFMusic",
-                    album: "Local library"
-                });
+        const track = tracks[current];
+
+        audio.src = track.url;
+
+        title.textContent = track.title;
+
+        status.textContent =
+            (current + 1) + " / " + tracks.length;
+
+        log("Current track: " + track.title);
+
+        if ("mediaSession" in navigator &&
+            "MediaMetadata" in window) {
+
+            try {
+                navigator.mediaSession.metadata =
+                    new MediaMetadata({
+                        title: track.title,
+                        artist: "CFMusic",
+                        album: "Local library"
+                    });
+            } catch (error) {
+                log(error.message);
             }
-
-            if (autoplay) play();
         }
 
-        function play() {
-            if (!tracks.length) return;
+        if (autoplay) play();
+    }
 
-            audio.play().catch(error => {
-                status.textContent = error.message;
-            });
+    function play() {
+        if (!tracks.length) {
+            status.textContent = "Import music first";
+            return;
         }
 
-        function toggle() {
-            audio.paused ? play() : audio.pause();
-        }
+        audio.play().catch(error => {
+            status.textContent = error.message;
+            log("Playback error: " + error.message);
+        });
+    }
 
-        function next() {
-            load(current + 1, true);
-        }
+    function toggle() {
+        audio.paused ? play() : audio.pause();
+    }
 
-        function previous() {
-            load(current - 1, true);
-        }
+    function next() {
+        load(current + 1, true);
+    }
 
-        function seek(seconds) {
-            if (!Number.isFinite(audio.duration)) return;
+    function previous() {
+        load(current - 1, true);
+    }
 
-            audio.currentTime = Math.max(
-                0,
-                Math.min(
-                    audio.duration,
-                    audio.currentTime + seconds
-                )
-            );
-        }
+    function seek(seconds) {
+        if (!Number.isFinite(audio.duration)) return;
 
-        audio.onended = next;
+        audio.currentTime = Math.max(
+            0,
+            Math.min(
+                audio.duration,
+                audio.currentTime + seconds
+            )
+        );
+    }
 
-        audio.onplaying = () => {
-            playButton.textContent = "⏸";
-            status.textContent = "Playing";
+    audio.addEventListener("ended", () => {
+        log("Track finished");
+        next();
+    });
 
-            if ("mediaSession" in navigator) {
-                navigator.mediaSession.playbackState = "playing";
-            }
-        };
-
-        audio.onpause = () => {
-            playButton.textContent = "▶";
-            status.textContent = "Paused";
-
-            if ("mediaSession" in navigator) {
-                navigator.mediaSession.playbackState = "paused";
-            }
-        };
-
-        audio.onerror = () => {
-            status.textContent = "Audio loading error";
-        };
+    audio.addEventListener("playing", () => {
+        playButton.textContent = "⏸";
+        status.textContent = "Playing";
 
         if ("mediaSession" in navigator) {
-            const actions = {
-                play: play,
-                pause: () => audio.pause(),
-                nexttrack: next,
-                previoustrack: previous,
-                seekforward: event => seek(event.seekOffset || 10),
-                seekbackward: event => seek(-(event.seekOffset || 10)),
-                seekto: event => {
-                    if (Number.isFinite(event.seekTime)) {
-                        audio.currentTime = event.seekTime;
-                    }
-                }
-            };
+            navigator.mediaSession.playbackState = "playing";
+        }
+    });
 
-            for (const [action, handler] of Object.entries(actions)) {
-                try {
-                    navigator.mediaSession.setActionHandler(action, handler);
-                } catch (error) {
-                    console.log(action, error);
+    audio.addEventListener("pause", () => {
+        playButton.textContent = "▶";
+        status.textContent = "Paused";
+
+        if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = "paused";
+        }
+    });
+
+    audio.addEventListener("error", () => {
+        status.textContent = "Audio loading error";
+
+        if (audio.error) {
+            log("Audio error: " + audio.error.code);
+        }
+    });
+
+    if ("mediaSession" in navigator) {
+
+        log("Media Session supported");
+
+        const actions = {
+            play: play,
+            pause: () => audio.pause(),
+            nexttrack: next,
+            previoustrack: previous,
+            seekforward: event =>
+                seek(event.seekOffset || 10),
+            seekbackward: event =>
+                seek(-(event.seekOffset || 10)),
+            seekto: event => {
+                if (Number.isFinite(event.seekTime)) {
+                    audio.currentTime = event.seekTime;
                 }
             }
+        };
 
-            audio.addEventListener("timeupdate", () => {
-                if (
-                    Number.isFinite(audio.duration) &&
-                    audio.duration > 0
-                ) {
-                    try {
-                        navigator.mediaSession.setPositionState({
-                            duration: audio.duration,
-                            playbackRate: audio.playbackRate,
-                            position: Math.min(
-                                audio.currentTime,
-                                audio.duration
-                            )
-                        });
-                    } catch (error) {}
-                }
-            });
+        for (const [action, handler] of Object.entries(actions)) {
+            try {
+                navigator.mediaSession.setActionHandler(
+                    action,
+                    handler
+                );
+            } catch (error) {
+                log(action + ": unsupported");
+            }
         }
 
-        if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("./sw.js")
-                .catch(console.error);
-        }
-    </script>
+        audio.addEventListener("timeupdate", () => {
+            if (
+                Number.isFinite(audio.duration) &&
+                audio.duration > 0
+            ) {
+                try {
+                    navigator.mediaSession.setPositionState({
+                        duration: audio.duration,
+                        playbackRate: audio.playbackRate,
+                        position: Math.min(
+                            audio.currentTime,
+                            audio.duration
+                        )
+                    });
+                } catch (error) {}
+            }
+        });
+    }
+
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("./sw.js")
+            .then(() => log("Service Worker registered"))
+            .catch(error => log(error.message));
+    }
+</script>
 
 </body>
 </html>
